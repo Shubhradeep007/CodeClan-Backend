@@ -10,6 +10,9 @@ DatabaseConnection()
 const authRoutes = require('./app/routes/user.route')
 app.use('/api/users', authRoutes)
 
+const snippetRoutes = require('./app/routes/snippets.routes')
+app.use('/api/snippets', snippetRoutes)
+
 const port = process.env.PORT || 4000
 app.listen(port, (err) => {
     if (err) {
