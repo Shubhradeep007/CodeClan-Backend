@@ -4,12 +4,17 @@ const schema = mongoose.Schema
 const UserSchema = new schema({
     user_name: {
         type: String,
-        required: true
+        required: true,
+        trim: true,
+        minlength: 3,
+        maxlength: 30
     },
     user_email: {
         type: String,
         required: true,
-        unique: true
+        unique: true,
+        lowercase: true,
+        trim: true
     },
     user_password: {
         type: String,
@@ -27,9 +32,12 @@ const UserSchema = new schema({
         type: String,
         enum: ['user', 'admin'],
         default: 'user'
+    },
+    isActive: {
+        type: Boolean,
+        default: true 
     }
 }, { timestamps: true })
 
 const UserModel = mongoose.model("user_model", UserSchema)
-
 module.exports = UserModel

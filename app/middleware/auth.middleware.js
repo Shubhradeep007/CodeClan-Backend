@@ -1,3 +1,6 @@
+const jwt = require('jsonwebtoken')
+const StatusCode = require('../utils/Status.codes')
+
 const middlewareAuthCheck = async (req, res, next) => {
     const token = req.body?.token || req.query?.token || req.headers["authorization"] || req.headers["x-access-token"]
 
@@ -11,15 +14,15 @@ const middlewareAuthCheck = async (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY)
         req.user = decoded
-
-        console.log("Loggin done: ", req.user);
-
+        console.log("Logged in user: ", req.user)
     } catch (error) {
         return res.status(StatusCode.UNAUTHORIZED).json({
             success: false,
-            message: "invalid token"
+            message: "Invalid token"
         })
     }
 
     return next()
 }
+
+module.exports = middlewareAuthCheck
