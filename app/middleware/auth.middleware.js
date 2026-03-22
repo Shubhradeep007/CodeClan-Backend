@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken')
-const StatusCode = require('../utils/Status.codes')
+const StatusCode = require('../utils/StatusCode')
 
 const middlewareAuthCheck = async (req, res, next) => {
     const token = req.body?.token || req.query?.token || req.headers["authorization"] || req.headers["x-access-token"]

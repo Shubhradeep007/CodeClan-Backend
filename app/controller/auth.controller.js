@@ -2,8 +2,8 @@ const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 
 const UserModel = require('../models/user.model')
-const StatusCode = require('../utils/Status.codes')
-const { cloudinary } = require('../utils/cloud.imageUpload')
+const StatusCode = require('../utils/StatusCode')
+const { cloudinary } = require('../utils/cloud.imageupload')
 
 const SALT = 12
 
