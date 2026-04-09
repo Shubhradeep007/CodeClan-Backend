@@ -36,7 +36,9 @@ const UserSchema = new schema({
     isActive: {
         type: Boolean,
         default: true 
-    }
+    },
+    resetPasswordToken: String,
+    resetPasswordExpire: Date
 }, { timestamps: true })
 
 const UserModel = mongoose.model("user_model", UserSchema)

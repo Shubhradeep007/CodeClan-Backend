@@ -59,6 +59,9 @@ app.use('/api/snippets/:id/vote', voteLimiter)
 const groupRouter = require('./app/routes/group.routes')
 app.use('/api/group', groupRouter)
 
+const followRouter = require('./app/routes/follow.route')
+app.use('/api/follow', followRouter)
+
 const adminRouter = require('./app/routes/admin.routes')
 app.use('/api/admin', adminRouter)
 

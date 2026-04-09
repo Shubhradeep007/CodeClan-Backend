@@ -119,7 +119,7 @@ class SnippetController {
 
             const snippets = await SnippetModel.find({
                 created_by: req.user.id,
-                is_deleted: false
+                is_deleted: { $ne: true }
             })
                 .sort({ createdAt: -1 })
                 .skip(skip)
@@ -127,7 +127,13 @@ class SnippetController {
 
             const total = await SnippetModel.countDocuments({
                 created_by: req.user.id,
-                is_deleted: false
+                is_deleted: { $ne: true }
+            })
+
+            const publicCount = await SnippetModel.countDocuments({
+                created_by: req.user.id,
+                visibility: 'public',
+                is_deleted: { $ne: true }
             })
 
             return res.status(StatusCode.SUCCESS).json({
@@ -136,6 +142,7 @@ class SnippetController {
                 data: {
                     snippets,
                     total,
+                    publicCount,
                     page,
                     totalPages: Math.ceil(total / limit)
                 }

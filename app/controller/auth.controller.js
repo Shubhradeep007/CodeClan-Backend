@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
+const mailer = require('../utils/mailer')
 
 const UserModel = require('../models/user.model')
 const StatusCode = require('../utils/StatusCode')
@@ -55,6 +57,9 @@ class AuthController {
             })
 
             await user.save()
+
+            // Dispatches welcome email silently
+            mailer.sendWelcomeEmail(user.user_email, user.user_name)
 
             const responseUser = {
                 _id: user._id,
@@ -286,6 +291,277 @@ class AuthController {
                 success: false,
                 message: "Failed to delete user"
             })
+        }
+    }
+
+    async searchUsers(req, res) {
+        try {
+            const { q } = req.query
+            if (!q) {
+                return res.status(StatusCode.BAD_REQUEST).json({
+                    success: false,
+                    message: "Search query q is required"
+                })
+            }
+
+            const page = parseInt(req.query.page) || 1
+            const limit = parseInt(req.query.limit) || 20
+            const skip = (page - 1) * limit
+            
+            // Require snippet model to reliably get collection name
+            const SnippetModel = require('../models/snippet.model')
+
+            const pipeline = [
+                {
+                    $match: {
+                        user_name: { $regex: q, $options: 'i' },
+                        isActive: { $ne: false }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: SnippetModel.collection.name,
+                        localField: '_id',
+                        foreignField: 'created_by',
+                        pipeline: [
+                            { $match: { visibility: 'public', is_deleted: false } }
+                        ],
+                        as: 'public_snippets'
+                    }
+                },
+                {
+                    $project: {
+                        user_name: 1,
+                        user_profile_image: 1,
+                        user_about: 1,
+                        createdAt: 1,
+                        publicSnippetCount: { $size: "$public_snippets" }
+                    }
+                },
+                { $sort: { publicSnippetCount: -1, createdAt: -1 } },
+                {
+                    $facet: {
+                        metadata: [{ $count: "total" }],
+                        data: [{ $skip: skip }, { $limit: limit }]
+                    }
+                }
+            ]
+
+            const results = await UserModel.aggregate(pipeline)
+            
+            const total = results[0].metadata.length > 0 ? results[0].metadata[0].total : 0
+            const users = results[0].data
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                message: "Users searched successfully",
+                data: {
+                    users,
+                    total,
+                    page,
+                    totalPages: Math.ceil(total / limit)
+                }
+            })
+
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({
+                success: false,
+                message: "Failed to search users"
+            })
+        }
+    }
+
+
+    async getPublicProfile(req, res) {
+        try {
+            const { username } = req.params
+            const SnippetModel = require('../models/snippet.model')
+            const FollowModel = require('../models/follow.model')
+
+            const pipeline = [
+                {
+                    $match: {
+                        user_name: username,
+                        isActive: { $ne: false }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: SnippetModel.collection.name,
+                        let: { userId: '$_id' },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: ['$created_by', '$$userId'] },
+                                            { $eq: ['$visibility', 'public'] },
+                                            { $ne: ['$is_deleted', true] }
+                                        ]
+                                    }
+                                }
+                            },
+                            { $sort: { createdAt: -1 } }
+                        ],
+                        as: 'public_snippets'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: FollowModel.collection.name,
+                        localField: '_id',
+                        foreignField: 'following_id',
+                        as: 'followers'
+                    }
+                },
+                {
+                    $lookup: {
+                        from: FollowModel.collection.name,
+                        localField: '_id',
+                        foreignField: 'follower_id',
+                        as: 'following'
+                    }
+                },
+                {
+                    $project: {
+                        user_name: 1,
+                        user_profile_image: 1,
+                        user_about: 1,
+                        createdAt: 1,
+                        public_snippets: 1,
+                        totalVoteScore: { $sum: "$public_snippets.vote_score" },
+                        publicSnippetCount: { $size: "$public_snippets" },
+                        followerCount: { $size: "$followers" },
+                        followingCount: { $size: "$following" }
+                    }
+                }
+            ]
+
+            const results = await UserModel.aggregate(pipeline)
+
+            if (!results || results.length === 0) {
+                return res.status(StatusCode.NOT_FOUND).json({
+                    success: false,
+                    message: "User not found"
+                })
+            }
+
+            // DEBUG — log follow counts to verify DB lookup is working
+            const userId = results[0]?._id
+            const rawFollowingCount = await FollowModel.countDocuments({ follower_id: userId })
+            const rawFollowerCount  = await FollowModel.countDocuments({ following_id: userId })
+            console.log(`[Profile:${username}] aggregation following=${results[0]?.followingCount} followers=${results[0]?.followerCount}`)
+            console.log(`[Profile:${username}] countDocuments  following=${rawFollowingCount} followers=${rawFollowerCount}`)
+
+            // Override with the reliable counts
+            results[0].followingCount = rawFollowingCount
+            results[0].followerCount  = rawFollowerCount
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                message: "User public profile fetched successfully",
+                data: results[0]
+            })
+
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({
+                success: false,
+                message: "Failed to fetch user profile"
+            })
+        }
+    }
+
+    async forgotPassword(req, res) {
+        try {
+            const { user_email } = req.body
+            const user = await UserModel.findOne({ user_email })
+
+            if (!user) {
+                return res.status(StatusCode.NOT_FOUND).json({ success: false, message: "User not found" })
+            }
+
+            const resetToken = crypto.randomBytes(32).toString('hex')
+            const hash = crypto.createHash('sha256').update(resetToken).digest('hex')
+
+            user.resetPasswordToken = hash
+            user.resetPasswordExpire = Date.now() + 60 * 60 * 1000 // 1 hour
+
+            await user.save()
+
+            await mailer.sendPasswordResetEmail(user.user_email, resetToken)
+
+            return res.status(StatusCode.SUCCESS).json({ success: true, message: "Password reset link sent to email" })
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Failed to process request" })
+        }
+    }
+
+    async resetPassword(req, res) {
+        try {
+            const { token } = req.params
+            const { new_password } = req.body
+
+            const hash = crypto.createHash('sha256').update(token).digest('hex')
+            const user = await UserModel.findOne({
+                resetPasswordToken: hash,
+                resetPasswordExpire: { $gt: Date.now() }
+            })
+
+            if (!user) {
+                return res.status(StatusCode.BAD_REQUEST).json({ success: false, message: "Invalid or expired token" })
+            }
+
+            user.user_password = await bcrypt.hash(new_password, SALT)
+            user.resetPasswordToken = undefined
+            user.resetPasswordExpire = undefined
+
+            await user.save()
+            return res.status(StatusCode.SUCCESS).json({ success: true, message: "Password reset successful. You can now login." })
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Failed to process reset" })
+        }
+    }
+
+    async getMyStats(req, res) {
+        try {
+            const userId = req.user.id  // string from JWT — Mongoose auto-casts for schema ObjectId refs
+            const SnippetModel = require('../models/snippet.model')
+            const FollowModel  = require('../models/follow.model')
+
+            console.log('[MyStats] userId from JWT:', userId, 'type:', typeof userId)
+
+            const [totalSnippets, publicSnippets, followingCount, followerCount, voteResult] = await Promise.all([
+                SnippetModel.countDocuments({ created_by: userId, is_deleted: { $ne: true } }),
+                SnippetModel.countDocuments({ created_by: userId, visibility: 'public', is_deleted: { $ne: true } }),
+                FollowModel.countDocuments({ follower_id: userId }),
+                FollowModel.countDocuments({ following_id: userId }),
+                SnippetModel.aggregate([
+                    { $match: { created_by: require('mongoose').Types.ObjectId.isValid(userId) ? new (require('mongoose').Types.ObjectId)(userId) : userId, is_deleted: { $ne: true } } },
+                    { $group: { _id: null, total: { $sum: '$vote_score' } } }
+                ])
+            ])
+
+            const totalVoteScore = voteResult[0]?.total || 0
+
+            console.log('[MyStats] results:', { totalSnippets, publicSnippets, followingCount, followerCount, totalVoteScore })
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                data: {
+                    totalSnippets,
+                    publicSnippets,
+                    followingCount,
+                    followerCount,
+                    totalVoteScore
+                }
+            })
+        } catch (error) {
+            console.error('[MyStats] error:', error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Failed to fetch stats" })
         }
     }
 
