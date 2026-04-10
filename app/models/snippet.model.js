@@ -44,6 +44,11 @@ const SnippetSchema = new schema({
         enum: ['private', 'public', 'group'],
         default: 'private'
     },
+    group_status: {
+        type: String,
+        enum: ['approved', 'pending'],
+        default: 'approved'
+    },
     vote_score: {
         type: Number,
         default: 0

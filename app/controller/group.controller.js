@@ -224,6 +224,7 @@ class groupModelcontroller {
             const snippets = await SnippetModel.find({
                 group_id: id,
                 is_deleted: false,
+                group_status: "approved"
             })
                 .populate("created_by", "user_name user_profile_image")
                 .sort({ createdAt: -1 })
@@ -262,11 +263,9 @@ class groupModelcontroller {
                 });
             }
 
+            let assignedStatus = "approved";
             if (membership && membership.member_role === "viewer") {
-                return res.status(status_Code.FORBIDDEN).json({
-                    success: false,
-                    message: "Viewers cannot assign snippets to groups",
-                });
+                assignedStatus = "pending";
             }
 
             const snippet = await SnippetModel.findOne({ _id: snippetId, is_deleted: false });
@@ -287,13 +286,15 @@ class groupModelcontroller {
 
             const updatedSnippet = await SnippetModel.findByIdAndUpdate(
                 snippetId,
-                { group_id, visibility: "group" },
+                { group_id, visibility: "group", group_status: assignedStatus },
                 { new: true }
             );
 
             return res.status(status_Code.SUCCESS).json({
                 success: true,
-                message: "Snippet assigned to group successfully",
+                message: assignedStatus === "pending" 
+                    ? "Snippet submitted for approval successfully" 
+                    : "Snippet assigned to group successfully",
                 data: updatedSnippet,
             });
         } catch (error) {
@@ -486,6 +487,138 @@ class groupModelcontroller {
             return res.status(status_Code.SUCCESS).json({
                 success: true,
                 message: "Member removed successfully",
+            });
+        } catch (error) {
+            return res.status(status_Code.SERVER_ERROR).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+
+    // ─── GET PENDING GROUP SNIPPETS (owner/mod only) ──────────────────
+    async getPendingGroupSnippets(req, res) {
+        try {
+            const { id } = req.params;
+
+            const membership = await GroupMemberModel.findOne({
+                group_id: id,
+                user_id: req.user.id,
+            });
+
+            if (!membership && req.user.role !== "admin") {
+                return res.status(status_Code.FORBIDDEN).json({
+                    success: false,
+                    message: "You are not a member of this group",
+                });
+            }
+
+            if (membership.member_role === "viewer" || membership.member_role === "member") {
+                return res.status(status_Code.FORBIDDEN).json({
+                    success: false,
+                    message: "You do not have permission to view pending snippets",
+                });
+            }
+
+            const snippets = await SnippetModel.find({
+                group_id: id,
+                is_deleted: false,
+                group_status: "pending",
+            })
+                .populate("created_by", "user_name user_profile_image")
+                .sort({ createdAt: -1 });
+
+            return res.status(status_Code.SUCCESS).json({
+                success: true,
+                message: "Pending snippets fetched successfully",
+                data: { snippets },
+            });
+        } catch (error) {
+            return res.status(status_Code.SERVER_ERROR).json({
+                 success: false,
+                 message: error.message,
+            });
+        }
+    }
+
+    // ─── APPROVE SNIPPET (owner/mod only) ─────────────────────────────
+    async approveGroupSnippet(req, res) {
+        try {
+            const { id: group_id, snippetId } = req.params;
+
+            const membership = await GroupMemberModel.findOne({
+                group_id,
+                user_id: req.user.id,
+            });
+
+            if ((!membership || (membership.member_role !== "owner" && membership.member_role !== "moderator")) && req.user.role !== "admin") {
+                return res.status(status_Code.FORBIDDEN).json({
+                    success: false,
+                    message: "You do not have permission to approve snippets",
+                });
+            }
+
+            const updatedSnippet = await SnippetModel.findOneAndUpdate(
+                { _id: snippetId, group_id, is_deleted: false },
+                { group_status: "approved" },
+                { new: true }
+            );
+
+            if (!updatedSnippet) {
+                return res.status(status_Code.NOT_FOUND).json({
+                    success: false,
+                    message: "Pending snippet not found in this group",
+                });
+            }
+
+            return res.status(status_Code.SUCCESS).json({
+                success: true,
+                message: "Snippet approved successfully",
+                data: updatedSnippet,
+            });
+        } catch (error) {
+            return res.status(status_Code.SERVER_ERROR).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+
+    // ─── REJECT SNIPPET (owner/mod only) ──────────────────────────────
+    async rejectGroupSnippet(req, res) {
+        try {
+            const { id: group_id, snippetId } = req.params;
+
+            const membership = await GroupMemberModel.findOne({
+                group_id,
+                user_id: req.user.id,
+            });
+
+            if ((!membership || (membership.member_role !== "owner" && membership.member_role !== "moderator")) && req.user.role !== "admin") {
+                return res.status(status_Code.FORBIDDEN).json({
+                    success: false,
+                    message: "You do not have permission to reject snippets",
+                });
+            }
+
+            // Remove from group, revert visibility to private.
+            const updatedSnippet = await SnippetModel.findOneAndUpdate(
+                { _id: snippetId, group_id, is_deleted: false },
+                { group_id: null, visibility: "private", group_status: "approved" },
+                { new: true }
+            );
+
+            if (!updatedSnippet) {
+                return res.status(status_Code.NOT_FOUND).json({
+                    success: false,
+                    message: "Pending snippet not found in this group",
+                });
+            }
+
+            return res.status(status_Code.SUCCESS).json({
+                success: true,
+                message: "Snippet rejected and removed from group",
+                data: updatedSnippet,
             });
         } catch (error) {
             return res.status(status_Code.SERVER_ERROR).json({

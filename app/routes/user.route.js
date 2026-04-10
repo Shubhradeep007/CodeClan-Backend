@@ -9,6 +9,7 @@ router.post("/register", uploadAvatar.single('user_profile_image'), userControll
 router.post("/login", userController.loginUser)
 router.post("/forgot-password", userController.forgotPassword)
 router.post("/reset-password/:token", userController.resetPassword)
+router.get("/verify-email/:token", userController.verifyEmail)
 
 router.get("/me", middlewareAuthCheck, userController.getMe)
 router.get("/my-stats", middlewareAuthCheck, userController.getMyStats)

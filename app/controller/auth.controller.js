@@ -47,35 +47,31 @@ class AuthController {
 
             const hashPassword = await bcrypt.hash(requestPayload.user_password, SALT)
 
+            // Generate email verification token
+            const rawVerifyToken = crypto.randomBytes(32).toString('hex')
+            const hashedVerifyToken = crypto.createHash('sha256').update(rawVerifyToken).digest('hex')
+
             const user = new UserModel({
                 user_name: requestPayload.user_name,
                 user_email: requestPayload.user_email,
                 user_password: hashPassword,
                 user_profile_image: requestPayload.user_profile_image,
                 user_about: requestPayload.user_about,
-                role: requestPayload.role
+                role: requestPayload.role,
+                isVerified: false,
+                emailVerifyToken: hashedVerifyToken,
+                emailVerifyExpire: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
             })
 
             await user.save()
 
-            // Dispatches welcome email silently
-            mailer.sendWelcomeEmail(user.user_email, user.user_name)
-
-            const responseUser = {
-                _id: user._id,
-                user_name: user.user_name,
-                user_email: user.user_email,
-                user_profile_image: user.user_profile_image,
-                user_about: user.user_about,
-                role: user.role,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt
-            }
+            // Send verification email (fire-and-forget)
+            mailer.sendVerificationEmail(user.user_email, user.user_name, rawVerifyToken)
 
             return res.status(StatusCode.CREATED).json({
                 success: true,
-                message: "User registered successfully",
-                data: responseUser
+                message: "Account created! Please check your email to verify your account before logging in.",
+                data: { user_email: user.user_email }
             })
 
         } catch (err) {
@@ -112,6 +108,13 @@ class AuthController {
                 return res.status(StatusCode.UNAUTHORIZED).json({
                     success: false,
                     message: "Your account has been suspended"
+                })
+            }
+
+            if (!user.isVerified) {
+                return res.status(StatusCode.UNAUTHORIZED).json({
+                    success: false,
+                    message: "Please verify your email address before logging in. Check your inbox for the verification link."
                 })
             }
 
@@ -470,6 +473,39 @@ class AuthController {
                 success: false,
                 message: "Failed to fetch user profile"
             })
+        }
+    }
+
+    async verifyEmail(req, res) {
+        try {
+            const { token } = req.params
+
+            if (!token) {
+                return res.status(StatusCode.BAD_REQUEST).json({ success: false, message: "Verification token is required" })
+            }
+
+            const hash = crypto.createHash('sha256').update(token).digest('hex')
+            const user = await UserModel.findOne({
+                emailVerifyToken: hash,
+                emailVerifyExpire: { $gt: Date.now() }
+            })
+
+            if (!user) {
+                return res.status(StatusCode.BAD_REQUEST).json({ success: false, message: "Invalid or expired verification link. Please register again or request a new link." })
+            }
+
+            user.isVerified = true
+            user.emailVerifyToken = undefined
+            user.emailVerifyExpire = undefined
+            await user.save()
+
+            // Send welcome email now that the user is verified
+            mailer.sendWelcomeEmail(user.user_email, user.user_name)
+
+            return res.status(StatusCode.SUCCESS).json({ success: true, message: "Email verified successfully! You can now log in." })
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Failed to verify email" })
         }
     }
 

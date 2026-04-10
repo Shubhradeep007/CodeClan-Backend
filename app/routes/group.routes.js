@@ -32,6 +32,9 @@ router.get("/:id", middlewareAuthCheck, groupcontroller.getGroupById);
 router.put("/:id", middlewareAuthCheck, uploadGroupAvatar.single("group_avatar"), groupcontroller.updateGroup);
 router.delete("/:id", middlewareAuthCheck, groupcontroller.archiveGroup);
 router.get("/:id/snippets", middlewareAuthCheck, groupcontroller.getGroupSnippets);
+router.get("/:id/snippets/pending", middlewareAuthCheck, groupcontroller.getPendingGroupSnippets);
 router.patch("/:id/snippets/:snippetId", middlewareAuthCheck, groupcontroller.assignSnippetToGroup);
+router.patch("/:id/snippets/:snippetId/approve", middlewareAuthCheck, groupcontroller.approveGroupSnippet);
+router.delete("/:id/snippets/:snippetId/reject", middlewareAuthCheck, groupcontroller.rejectGroupSnippet);
 
 module.exports = router;

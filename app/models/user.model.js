@@ -37,6 +37,12 @@ const UserSchema = new schema({
         type: Boolean,
         default: true 
     },
+    isVerified: {
+        type: Boolean,
+        default: false
+    },
+    emailVerifyToken: String,
+    emailVerifyExpire: Date,
     resetPasswordToken: String,
     resetPasswordExpire: Date
 }, { timestamps: true })
