@@ -2,18 +2,30 @@ const nodemailer = require('nodemailer')
 
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-    port: process.env.EMAIL_PORT || 587,
-    secure: false, // true for port 465, false for other ports
+    port: parseInt(process.env.EMAIL_PORT) || 587,
+    secure: process.env.EMAIL_PORT == 465, // true for 465, false for others
     auth: {
         user: process.env.EMAIL_USER || 'shubhradeepbose79@gmail.com',
         pass: process.env.EMAIL_PASS || 'jnmp gxub vgcd tzqv',
     },
+    tls: {
+        rejectUnauthorized: false // Helps with some restricted networks
+    }
+})
+
+// Verify connection on startup
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ Mail server connection failed:', error.message)
+    } else {
+        console.log('✅ Mail server is ready to take our messages')
+    }
 })
 
 exports.sendWelcomeEmail = async (to, username) => {
     try {
         const mailOptions = {
-            from: `"CodeClan Support" <${process.env.EMAIL_USER || 'shubhradeepbose79@gmail.com'}>`,
+            from: `"CodeClan Support" <${process.env.EMAIL_FROM || 'shubhradeepbose79@gmail.com'}>`,
             to: to,
             subject: 'Welcome to CodeClan!',
             html: `
@@ -45,7 +57,7 @@ exports.sendVerificationEmail = async (to, username, token) => {
         const verifyLink = `${frontendUrl}/verify-email?token=${token}`
 
         const mailOptions = {
-            from: `"CodeClan Support" <${process.env.EMAIL_USER || 'shubhradeepbose79@gmail.com'}>`,
+            from: `"CodeClan Support" <${process.env.EMAIL_FROM || 'shubhradeepbose79@gmail.com'}>`,
             to: to,
             subject: 'CodeClan — Verify Your Email',
             html: `
@@ -81,7 +93,7 @@ exports.sendPasswordResetEmail = async (to, token) => {
         const resetLink = `${frontendUrl}/reset-password?token=${token}`
 
         const mailOptions = {
-            from: `"CodeClan Support" <${process.env.EMAIL_USER || 'shubhradeepbose79@gmail.com'}>`,
+            from: `"CodeClan Support" <${process.env.EMAIL_FROM || 'shubhradeepbose79@gmail.com'}>`,
             to: to,
             subject: 'CodeClan - Password Reset Request',
             html: `
