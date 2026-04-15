@@ -62,6 +62,34 @@ class groupModelcontroller {
         }
     }
 
+    // ─── GET ALL GROUPS (Admin only) ───────────────────────────────────
+    async getAllGroups(req, res) {
+        try {
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 20;
+            const skip = (page - 1) * limit;
+
+            const groups = await group_model.find()
+                .populate("owner_id", "user_name user_email")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit);
+
+            const total = await group_model.countDocuments();
+
+            return res.status(status_Code.SUCCESS).json({
+                success: true,
+                message: "All groups fetched successfully",
+                data: { groups, total, page, totalPages: Math.ceil(total / limit) },
+            });
+        } catch (error) {
+            return res.status(status_Code.SERVER_ERROR).json({
+                success: false,
+                message: error.message,
+            });
+        }
+    }
+
     // ─── GET GROUP BY ID ───────────────────────────────────────────────
     async getGroupById(req, res) {
         try {
@@ -370,23 +398,25 @@ class groupModelcontroller {
         try {
             const { group_id, user_id, new_role } = req.body;
 
-            const curUser = await GroupMemberModel.findOne({
-                user_id: req.user.id,
-                group_id,
-            });
-
-            if (!curUser) {
-                return res.status(status_Code.UNAUTHORIZED).json({
-                    success: false,
-                    message: "You are not part of this group",
+            if (req.user.role !== "admin") {
+                const curUser = await GroupMemberModel.findOne({
+                    user_id: req.user.id,
+                    group_id,
                 });
-            }
 
-            if (curUser.member_role !== "owner") {
-                return res.status(status_Code.FORBIDDEN).json({
-                    success: false,
-                    message: "Only the owner can change roles",
-                });
+                if (!curUser) {
+                    return res.status(status_Code.UNAUTHORIZED).json({
+                        success: false,
+                        message: "You are not part of this group",
+                    });
+                }
+
+                if (curUser.member_role !== "owner") {
+                    return res.status(status_Code.FORBIDDEN).json({
+                        success: false,
+                        message: "Only the owner can change roles",
+                    });
+                }
             }
 
             const member = await GroupMemberModel.findOne({ group_id, user_id });
@@ -440,23 +470,25 @@ class groupModelcontroller {
         try {
             const { group_id, user_id } = req.body;
 
-            const curUser = await GroupMemberModel.findOne({
-                group_id,
-                user_id: req.user.id,
-            });
-
-            if (!curUser) {
-                return res.status(status_Code.UNAUTHORIZED).json({
-                    success: false,
-                    message: "You are not part of this group",
+            if (req.user.role !== "admin") {
+                const curUser = await GroupMemberModel.findOne({
+                    group_id,
+                    user_id: req.user.id,
                 });
-            }
 
-            if (curUser.member_role !== "owner") {
-                return res.status(status_Code.FORBIDDEN).json({
-                    success: false,
-                    message: "Only the owner can remove members",
-                });
+                if (!curUser) {
+                    return res.status(status_Code.UNAUTHORIZED).json({
+                        success: false,
+                        message: "You are not part of this group",
+                    });
+                }
+
+                if (curUser.member_role !== "owner") {
+                    return res.status(status_Code.FORBIDDEN).json({
+                        success: false,
+                        message: "Only the owner can remove members",
+                    });
+                }
             }
 
             const member = await GroupMemberModel.findOne({ group_id, user_id });

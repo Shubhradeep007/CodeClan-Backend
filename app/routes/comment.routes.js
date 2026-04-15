@@ -16,5 +16,6 @@ router.post('/', middlewareAuthCheck, commentController.addComment)
 router.get('/:snippetId', optionalAuth, commentController.getSnippetComments)
 router.put('/:id', middlewareAuthCheck, commentController.updateComment)
 router.delete('/:id', middlewareAuthCheck, commentController.deleteComment)
+router.put('/:id/like', middlewareAuthCheck, commentController.toggleLikeComment)
 
 module.exports = router

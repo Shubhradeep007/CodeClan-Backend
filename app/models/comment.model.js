@@ -23,6 +23,10 @@ const CommentSchema = new schema({
         trim: true,
         maxlength: 2000
     },
+    likes: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'user_model'
+    }],
     is_deleted: {
         type: Boolean,
         default: false  // soft delete — keeps thread structure intact

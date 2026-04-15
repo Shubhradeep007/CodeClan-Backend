@@ -1,14 +1,26 @@
 require('dotenv').config()
 const express = require("express")
 const cors = require("cors")
+const cookieParser = require("cookie-parser")
 const rateLimit = require("express-rate-limit")
 
 const app = express()
 
 // ─── CORS ─────────────────────────────────────────────────────────────────
-// In production, replace '*' with your exact frontend domain(s)
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()) 
+    : ['http://localhost:3000']
+
 app.use(cors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true)
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true)
+        } else {
+            callback(new Error('Not allowed by CORS'))
+        }
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token'],
     credentials: true
@@ -41,6 +53,7 @@ const voteLimiter = rateLimit({
 
 // ─── BODY PARSER ──────────────────────────────────────────────────────────
 app.use(express.json())
+app.use(cookieParser())
 
 // ─── DATABASE ─────────────────────────────────────────────────────────────
 const DatabaseConnection = require('./app/config/dbconfig')

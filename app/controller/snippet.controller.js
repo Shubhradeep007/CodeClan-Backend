@@ -171,8 +171,8 @@ class SnippetController {
                 })
             }
 
-            // Only the owner can update
-            if (snippet.created_by.toString() !== req.user.id) {
+            // Only the owner or admin can update
+            if (snippet.created_by.toString() !== req.user.id && req.user.role !== 'admin') {
                 return res.status(StatusCode.UNAUTHORIZED).json({
                     success: false,
                     message: "You are not authorized to update this snippet"
@@ -266,7 +266,7 @@ class SnippetController {
                 })
             }
 
-            if (snippet.created_by.toString() !== req.user.id) {
+            if (snippet.created_by.toString() !== req.user.id && req.user.role !== 'admin') {
                 return res.status(StatusCode.UNAUTHORIZED).json({
                     success: false,
                     message: "You are not authorized to change this snippet's visibility"
@@ -450,8 +450,11 @@ async function checkSnippetAccess(snippet, user) {
     // Public snippets — anyone can access
     if (snippet.visibility === 'public') return true
 
-    // No user token — deny
+    // No user token — deny access unless it's a public snippet
     if (!user) return false
+
+    // Admins have free access to all data
+    if (user.role === 'admin') return true
 
     // Owner always has access
     if (snippet.created_by._id.toString() === user.id) return true

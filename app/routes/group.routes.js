@@ -3,6 +3,7 @@ const router = express.Router();
 
 const middlewareAuthCheck = require("../middleware/auth.middleware");
 const groupcontroller = require("../controller/group.controller");
+const requireAdmin = require("../middleware/admin.middleware");
 const { uploadGroupAvatar } = require("../utils/cloud.imageupload");
 
 // ─── GROUP ROUTES ─────────────────────────────────────────────────────────
@@ -12,6 +13,9 @@ const { uploadGroupAvatar } = require("../utils/cloud.imageupload");
 // POST   /api/group/invite              — join a group via invite code
 // PUT    /api/group/change-role         — change a member's role (owner only)
 // DELETE /api/group/remove-member       — remove a member (owner only)
+
+// GET    /api/group/all                 — get ALL groups (admin only)
+router.get("/all", middlewareAuthCheck, requireAdmin, groupcontroller.getAllGroups);
 
 router.post("/create/group", middlewareAuthCheck, uploadGroupAvatar.single("group_avatar"), groupcontroller.createGroup);
 router.get("/mygroup", middlewareAuthCheck, groupcontroller.getmyGroup);

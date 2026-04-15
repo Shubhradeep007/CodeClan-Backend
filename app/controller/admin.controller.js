@@ -177,6 +177,48 @@ class AdminController {
         }
     }
 
+    // ─── UPDATE USER ROLE ─────────────────────────────────────────────
+    async updateUserRole(req, res) {
+        try {
+            const { id } = req.params
+            const { role } = req.body
+
+            // Admin cannot demote themselves
+            if (req.user.id === id && role !== 'admin') {
+                return res.status(StatusCode.BAD_REQUEST).json({
+                    success: false,
+                    message: "You cannot change your own administrative role"
+                })
+            }
+
+            const user = await UserModel.findByIdAndUpdate(
+                id,
+                { role },
+                { new: true }
+            ).select('-user_password')
+
+            if (!user) {
+                return res.status(StatusCode.NOT_FOUND).json({
+                    success: false,
+                    message: "User not found"
+                })
+            }
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                message: `User "${user.user_name}" role updated to ${role}`,
+                data: user
+            })
+
+        } catch (err) {
+            console.error(err)
+            return res.status(StatusCode.SERVER_ERROR).json({
+                success: false,
+                message: "Failed to update user role"
+            })
+        }
+    }
+
 }
 
 module.exports = new AdminController()

@@ -1,5 +1,6 @@
 const VoteModel = require('../models/vote.model')
 const SnippetModel = require('../models/snippet.model')
+const GroupMemberModel = require('../models/group.member.model')
 const StatusCode = require('../utils/StatusCode')
 
 class VoteController {
@@ -13,14 +14,7 @@ class VoteController {
     async castVote(req, res) {
         try {
             const { id } = req.params           // snippet id
-            const { vote_value } = req.body     // 1 or -1
-
-            if (vote_value !== 1 && vote_value !== -1) {
-                return res.status(StatusCode.BAD_REQUEST).json({
-                    success: false,
-                    message: "vote_value must be 1 (upvote) or -1 (downvote)"
-                })
-            }
+            const { vote } = req.body           // 'up', 'down', or 'none'
 
             const snippet = await SnippetModel.findOne({ _id: id, is_deleted: false })
 
@@ -31,11 +25,12 @@ class VoteController {
                 })
             }
 
-            // Only public snippets can be voted on
-            if (snippet.visibility !== 'public') {
-                return res.status(StatusCode.BAD_REQUEST).json({
+            // ── Access Check ──
+            const canVote = await checkVoteAccess(snippet, req.user)
+            if (!canVote) {
+                return res.status(StatusCode.FORBIDDEN).json({
                     success: false,
-                    message: "You can only vote on public snippets"
+                    message: "You do not have permission to vote on this snippet."
                 })
             }
 
@@ -44,59 +39,65 @@ class VoteController {
                 snippet_id: id
             })
 
-            let newVoteScore
-            let userVote
+            let newVoteScore = snippet.vote_score
+            let finalVote = 'none'
 
-            if (!existingVote) {
-                // ── Case A: No vote yet — insert new vote ──────────────
-                await VoteModel.create({
-                    user_id: req.user.id,
-                    snippet_id: id,
-                    vote_value: vote_value
-                })
-
-                const updatedSnippet = await SnippetModel.findByIdAndUpdate(
-                    id,
-                    { $inc: { vote_score: vote_value } },
-                    { new: true }
-                )
-
-                newVoteScore = updatedSnippet.vote_score
-                userVote = vote_value
-
-            } else if (existingVote.vote_value === vote_value) {
-                // ── Case B: Same vote — toggle off (remove vote) ───────
-                await VoteModel.findByIdAndDelete(existingVote._id)
-
-                const updatedSnippet = await SnippetModel.findByIdAndUpdate(
-                    id,
-                    { $inc: { vote_score: -vote_value } },
-                    { new: true }
-                )
-
-                newVoteScore = updatedSnippet.vote_score
-                userVote = null
-
+            if (vote === 'none') {
+                if (existingVote) {
+                    await VoteModel.findByIdAndDelete(existingVote._id)
+                    const updated = await SnippetModel.findByIdAndUpdate(
+                        id,
+                        { $inc: { vote_score: -existingVote.vote_value } },
+                        { new: true }
+                    )
+                    newVoteScore = updated.vote_score
+                }
+                finalVote = 'none'
             } else {
-                // ── Case C: Opposite vote — flip direction ─────────────
-                await VoteModel.findByIdAndUpdate(existingVote._id, { vote_value: vote_value })
+                const vote_value = vote === 'up' ? 1 : -1
 
-                const updatedSnippet = await SnippetModel.findByIdAndUpdate(
-                    id,
-                    { $inc: { vote_score: vote_value * 2 } },
-                    { new: true }
-                )
-
-                newVoteScore = updatedSnippet.vote_score
-                userVote = vote_value
+                if (!existingVote) {
+                    await VoteModel.create({
+                        user_id: req.user.id,
+                        snippet_id: id,
+                        vote_value
+                    })
+                    const updated = await SnippetModel.findByIdAndUpdate(
+                        id,
+                        { $inc: { vote_score: vote_value } },
+                        { new: true }
+                    )
+                    newVoteScore = updated.vote_score
+                    finalVote = vote
+                } else if (existingVote.vote_value === vote_value) {
+                    // Toggle off
+                    await VoteModel.findByIdAndDelete(existingVote._id)
+                    const updated = await SnippetModel.findByIdAndUpdate(
+                        id,
+                        { $inc: { vote_score: -vote_value } },
+                        { new: true }
+                    )
+                    newVoteScore = updated.vote_score
+                    finalVote = 'none'
+                } else {
+                    // Change vote
+                    await VoteModel.findByIdAndUpdate(existingVote._id, { vote_value })
+                    const updated = await SnippetModel.findByIdAndUpdate(
+                        id,
+                        { $inc: { vote_score: vote_value * 2 } },
+                        { new: true }
+                    )
+                    newVoteScore = updated.vote_score
+                    finalVote = vote
+                }
             }
 
             return res.status(StatusCode.SUCCESS).json({
                 success: true,
-                message: userVote === null ? "Vote removed" : vote_value === 1 ? "Upvoted successfully" : "Downvoted successfully",
+                message: "Vote cast successfully",
                 data: {
                     vote_score: newVoteScore,
-                    user_vote: userVote
+                    vote: finalVote
                 }
             })
 
@@ -133,7 +134,7 @@ class VoteController {
                 message: "Vote status fetched",
                 data: {
                     vote_score: snippet.vote_score,
-                    user_vote: existingVote ? existingVote.vote_value : null
+                    vote: existingVote ? (existingVote.vote_value === 1 ? 'up' : 'down') : 'none'
                 }
             })
 
@@ -146,6 +147,25 @@ class VoteController {
         }
     }
 
+}
+
+async function checkVoteAccess(snippet, user) {
+    if (snippet.visibility === 'public') return true
+    if (!user) return false
+    
+    // Owner of the snippet
+    if (snippet.created_by.toString() === user.id) return true
+
+    // Group member check
+    if (snippet.group_id) {
+        const member = await GroupMemberModel.findOne({
+            group_id: snippet.group_id,
+            user_id: user.id
+        })
+        return !!member
+    }
+
+    return false
 }
 
 module.exports = new VoteController()

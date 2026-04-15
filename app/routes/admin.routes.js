@@ -18,6 +18,7 @@ router.get('/users', adminController.getAllUsers)
 router.get('/users/:id', adminController.getUserById)
 router.patch('/users/:id/suspend', adminController.suspendUser)
 router.patch('/users/:id/activate', adminController.activateUser)
+router.patch('/users/:id/role', adminController.updateUserRole)
 
 // ─── SNIPPET MANAGEMENT ───────────────────────────────────────────────────
 // DELETE /api/admin/snippets/:id    — hard delete any snippet

@@ -195,8 +195,8 @@ class CommentController {
                 })
             }
 
-            // Only the author can edit their comment
-            if (comment.author_id.toString() !== req.user.id) {
+            // Only the author or admin can edit their comment
+            if (comment.author_id.toString() !== req.user.id && req.user.role !== 'admin') {
                 return res.status(StatusCode.FORBIDDEN).json({
                     success: false,
                     message: "You are not authorized to edit this comment"
@@ -263,12 +263,60 @@ class CommentController {
         }
     }
 
+    // ─── TOGGLE LIKE COMMENT ──────────────────────────────────────────
+    // PUT /api/comments/:id/like
+    async toggleLikeComment(req, res) {
+        try {
+            const { id } = req.params;
+            const comment = await CommentModel.findOne({ _id: id, is_deleted: false });
+
+            if (!comment) {
+                return res.status(StatusCode.NOT_FOUND).json({
+                    success: false,
+                    message: "Comment not found"
+                });
+            }
+
+            const userIdStr = req.user.id;
+            const hasLiked = comment.likes.some(likedUserId => likedUserId.toString() === userIdStr);
+
+            if (hasLiked) {
+                // Unlike
+                comment.likes = comment.likes.filter(userId => userId.toString() !== userIdStr);
+            } else {
+                // Like
+                comment.likes.push(userIdStr);
+            }
+
+            await comment.save();
+
+            const populatedComment = await CommentModel.findById(id).populate('author_id', 'user_name user_profile_image');
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                message: hasLiked ? "Comment unliked" : "Comment liked",
+                data: populatedComment
+            });
+
+        } catch (err) {
+            console.error(err);
+            return res.status(StatusCode.SERVER_ERROR).json({
+                success: false,
+                message: "Failed to toggle like on comment"
+            });
+        }
+    }
+
 }
 
 // ─── HELPER: snippet access check (mirrors snippet.controller.js) ──────────
 async function checkSnippetAccess(snippet, user) {
     if (snippet.visibility === 'public') return true
     if (!user) return false
+    
+    // Admins have free access to all data
+    if (user.role === 'admin') return true
+
     if (snippet.created_by.toString() === user.id) return true
     if (snippet.group_id) {
         const member = await GroupMemberModel.findOne({

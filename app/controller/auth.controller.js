@@ -4,6 +4,9 @@ const crypto = require('crypto')
 const mailer = require('../utils/mailer')
 
 const UserModel = require('../models/user.model')
+const SnippetModel = require('../models/snippet.model')
+const TokenModel = require('../models/token.model')
+const FollowModel = require('../models/follow.model')
 const StatusCode = require('../utils/StatusCode')
 const { cloudinary } = require('../utils/cloud.imageupload')
 
@@ -114,7 +117,7 @@ class AuthController {
             if (!user.isVerified) {
                 return res.status(StatusCode.UNAUTHORIZED).json({
                     success: false,
-                    message: "Please verify your email address before logging in. Check your inbox for the verification link."
+                    message: "Please verify your email address before logging in."
                 })
             }
 
@@ -127,15 +130,35 @@ class AuthController {
                 })
             }
 
-            const token = jwt.sign({
+            // Create tokens
+            const accessToken = jwt.sign({
                 id: user._id,
                 user_name: user.user_name,
-                user_email: user.user_email,
-                user_profile_image: user.user_profile_image,
-                user_about: user.user_about,
-                role: user.role,
-                createdAt: user.createdAt
-            }, process.env.JWT_SECRET_KEY, { expiresIn: "1d" })
+                role: user.role
+            }, process.env.JWT_SECRET_KEY, { expiresIn: "15m" })
+
+            const refreshToken = jwt.sign({
+                id: user._id,
+            }, process.env.REFRESH_SECRET_KEY || process.env.JWT_SECRET_KEY, { expiresIn: "7d" })
+
+            // Save refresh token to DB (Stateful)
+            const expiryDate = new Date()
+            expiryDate.setDate(expiryDate.getDate() + 7)
+            
+            await TokenModel.create({
+                userId: user._id,
+                refreshToken: refreshToken,
+                expiresAt: expiryDate
+            })
+
+            // Set refresh token in cookie
+            res.cookie('jid', refreshToken, {
+                httpOnly: true,
+                path: '/api/users/refresh-token',
+                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+                sameSite: 'lax',
+                secure: process.env.NODE_ENV === 'production'
+            })
 
             return res.status(StatusCode.SUCCESS).json({
                 success: true,
@@ -148,7 +171,7 @@ class AuthController {
                     user_about: user.user_about || "",
                     role: user.role
                 },
-                token: token
+                token: accessToken
             })
 
         } catch (error) {
@@ -157,6 +180,66 @@ class AuthController {
                 success: false,
                 message: "Login failed"
             })
+        }
+    }
+
+    async refreshToken(req, res) {
+        try {
+            const token = req.cookies.jid
+            if (!token) {
+                return res.status(StatusCode.UNAUTHORIZED).json({ success: false, message: "No refresh token provided" })
+            }
+
+            // Stateful check — verify token exists in DB
+            const tokenRecord = await TokenModel.findOne({ refreshToken: token })
+            if (!tokenRecord) {
+                return res.status(StatusCode.UNAUTHORIZED).json({ success: false, message: "Token revoked or not found" })
+            }
+
+            let payload = null
+            try {
+                payload = jwt.verify(token, process.env.REFRESH_SECRET_KEY || process.env.JWT_SECRET_KEY)
+            } catch (err) {
+                // If JWT verification fails, remove from DB just in case
+                await TokenModel.deleteOne({ refreshToken: token })
+                return res.status(StatusCode.UNAUTHORIZED).json({ success: false, message: "Invalid refresh token" })
+            }
+
+            const user = await UserModel.findById(payload.id)
+            if (!user) {
+                return res.status(StatusCode.UNAUTHORIZED).json({ success: false, message: "User no longer exists" })
+            }
+
+            const accessToken = jwt.sign({
+                id: user._id,
+                user_name: user.user_name,
+                role: user.role
+            }, process.env.JWT_SECRET_KEY, { expiresIn: "15m" })
+
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                token: accessToken
+            })
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Refresh failed" })
+        }
+    }
+
+    async logoutUser(req, res) {
+        try {
+            const token = req.cookies.jid
+            if (token) {
+                await TokenModel.deleteOne({ refreshToken: token })
+            }
+            res.clearCookie('jid', { path: '/api/users/refresh-token' })
+            return res.status(StatusCode.SUCCESS).json({
+                success: true,
+                message: "Logged out successfully"
+            })
+        } catch (error) {
+            console.error(error)
+            return res.status(StatusCode.SERVER_ERROR).json({ success: false, message: "Logout failed" })
         }
     }
 
@@ -311,14 +394,12 @@ class AuthController {
             const limit = parseInt(req.query.limit) || 20
             const skip = (page - 1) * limit
             
-            // Require snippet model to reliably get collection name
-            const SnippetModel = require('../models/snippet.model')
 
             const pipeline = [
                 {
                     $match: {
                         user_name: { $regex: q, $options: 'i' },
-                        isActive: { $ne: false }
+                        ...(req.user.role !== 'admin' && { isActive: { $ne: false } })
                     }
                 },
                 {
@@ -379,14 +460,12 @@ class AuthController {
     async getPublicProfile(req, res) {
         try {
             const { username } = req.params
-            const SnippetModel = require('../models/snippet.model')
-            const FollowModel = require('../models/follow.model')
 
             const pipeline = [
                 {
                     $match: {
                         user_name: username,
-                        isActive: { $ne: false }
+                        ...(req.user?.role !== 'admin' && { isActive: { $ne: false } })
                     }
                 },
                 {
@@ -399,7 +478,7 @@ class AuthController {
                                     $expr: {
                                         $and: [
                                             { $eq: ['$created_by', '$$userId'] },
-                                            { $eq: ['$visibility', 'public'] },
+                                            ...(req.user?.role !== 'admin' ? [{ $eq: ['$visibility', 'public'] }] : []),
                                             { $ne: ['$is_deleted', true] }
                                         ]
                                     }
@@ -564,19 +643,17 @@ class AuthController {
 
     async getMyStats(req, res) {
         try {
-            const userId = req.user.id  // string from JWT — Mongoose auto-casts for schema ObjectId refs
-            const SnippetModel = require('../models/snippet.model')
-            const FollowModel  = require('../models/follow.model')
-
-            console.log('[MyStats] userId from JWT:', userId, 'type:', typeof userId)
+            const targetUserId = (req.user.role === 'admin' && req.query.userId) ? req.query.userId : req.user.id
+            
+            console.log(`[MyStats] targetUserId: ${targetUserId} (Requested by: ${req.user.id}, Role: ${req.user.role})`)
 
             const [totalSnippets, publicSnippets, followingCount, followerCount, voteResult] = await Promise.all([
-                SnippetModel.countDocuments({ created_by: userId, is_deleted: { $ne: true } }),
-                SnippetModel.countDocuments({ created_by: userId, visibility: 'public', is_deleted: { $ne: true } }),
-                FollowModel.countDocuments({ follower_id: userId }),
-                FollowModel.countDocuments({ following_id: userId }),
+                SnippetModel.countDocuments({ created_by: targetUserId, is_deleted: { $ne: true } }),
+                SnippetModel.countDocuments({ created_by: targetUserId, visibility: 'public', is_deleted: { $ne: true } }),
+                FollowModel.countDocuments({ follower_id: targetUserId }),
+                FollowModel.countDocuments({ following_id: targetUserId }),
                 SnippetModel.aggregate([
-                    { $match: { created_by: require('mongoose').Types.ObjectId.isValid(userId) ? new (require('mongoose').Types.ObjectId)(userId) : userId, is_deleted: { $ne: true } } },
+                    { $match: { created_by: require('mongoose').Types.ObjectId.isValid(targetUserId) ? new (require('mongoose').Types.ObjectId)(targetUserId) : targetUserId, is_deleted: { $ne: true } } },
                     { $group: { _id: null, total: { $sum: '$vote_score' } } }
                 ])
             ])
